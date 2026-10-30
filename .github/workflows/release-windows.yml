@@ -50,26 +50,38 @@ jobs:
             "app=$($app.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           }
 
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "name=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=v0.2.0" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'v0.1.0' }}
-          name: MultiSearch / 聚合搜索 ${{ github.ref_type == 'tag' && github.ref_name || 'v0.1.0' }}
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: MultiSearch / 聚合搜索 ${{ steps.tag.outputs.name }}
           body: |
-            ## MultiSearch / 聚合搜索 Windows 安装包
+            ## MultiSearch / 聚合搜索 ${{ steps.tag.outputs.name }}
 
-            - 产品：MultiSearch / 聚合搜索
-            - 版本：0.1.0
-            - 安装包：NSIS `*-setup.exe`（未代码签名）
+            ### 更新内容
+            - 接入真实多引擎并行聚合（百度、必应、Google；可选搜狗、360、DuckDuckGo）
+            - 结果列表展示标题、来源、摘要、链接
+            - 设置页支持引擎开关与排序；可选 Bing Web Search API Key
+            - 反爬失败时降级为官方搜索入口
 
             ### 安装说明
             1. 下载 `*-setup.exe` 并运行
             2. 安装包**未签名**，Windows SmartScreen / 杀毒软件可能提示「未知发布者」——选择「更多信息」→「仍要运行」即可
-            3. 需要 Windows 10/11 与 WebView2（安装程序通常会处理）
+            3. 需要 Windows 10/11 与 WebView2
 
-            ### 资源
-            - `*-setup.exe`：推荐的安装程序
-            - `MultiSearch.exe`：可选的未打包可执行文件（仍需系统已有 WebView2）
+            ### 已知限制
+            - 百度 / Google 等可能触发验证码，此时仅提供官方结果页入口
+            - 无 Key 时必应走 RSS/HTML；可在设置中配置 Azure Bing Key 提升稳定性
 
             仓库：https://github.com/ccao43043-jpg/multisearch-desktop
           files: |

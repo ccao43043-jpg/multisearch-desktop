@@ -1,5 +1,6 @@
 import {
   AppSettings,
+  DEFAULT_ENGINE_ORDER,
   DEFAULT_SETTINGS,
   EngineId,
   FavoriteItem,
@@ -28,10 +29,30 @@ function writeJson(key: string, value: unknown) {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
+function normalizeOrder(order: EngineId[] | undefined): EngineId[] {
+  const seen = new Set<EngineId>();
+  const next: EngineId[] = [];
+  for (const id of order ?? []) {
+    if (DEFAULT_ENGINE_ORDER.includes(id) && !seen.has(id)) {
+      seen.add(id);
+      next.push(id);
+    }
+  }
+  for (const id of DEFAULT_ENGINE_ORDER) {
+    if (!seen.has(id)) next.push(id);
+  }
+  return next;
+}
+
 export function loadSettings(): AppSettings {
   const saved = readJson<Partial<AppSettings>>(KEYS.settings, {});
   return {
     engines: { ...DEFAULT_SETTINGS.engines, ...(saved.engines ?? {}) },
+    engineOrder: normalizeOrder(saved.engineOrder),
+    bingApiKey:
+      typeof saved.bingApiKey === "string"
+        ? saved.bingApiKey
+        : DEFAULT_SETTINGS.bingApiKey,
   };
 }
 
@@ -76,7 +97,6 @@ export function loadFavorites(): FavoriteItem[] {
 export function addFavorite(item: Omit<FavoriteItem, "id" | "at">): FavoriteItem[] {
   const now = Date.now();
   const prev = loadFavorites();
-  // 去重：同 URL 或同标题+查询
   const exists = prev.some(
     (f) =>
       (item.url && f.url === item.url) ||
@@ -101,8 +121,8 @@ export function removeFavorite(id: string): FavoriteItem[] {
   return next;
 }
 
+/** 按设置中的顺序返回已启用引擎 */
 export function enabledEngineIds(settings: AppSettings): EngineId[] {
-  return (Object.keys(settings.engines) as EngineId[]).filter(
-    (id) => settings.engines[id],
-  );
+  const order = normalizeOrder(settings.engineOrder);
+  return order.filter((id) => settings.engines[id]);
 }

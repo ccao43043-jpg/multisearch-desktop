@@ -15,7 +15,7 @@ export function FavoritesPage({ items, onChange, onReuse }: Props) {
 
       {items.length === 0 ? (
         <p className="py-16 text-center text-sm text-neutral-600">
-          暂无收藏。可在搜索页收藏关键词或引擎入口。
+          暂无收藏。可在搜索页收藏关键词或搜索结果。
         </p>
       ) : (
         <ul className="divide-y divide-neutral-900">

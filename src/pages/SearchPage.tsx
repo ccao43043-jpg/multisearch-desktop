@@ -1,7 +1,13 @@
 import { FormEvent, useEffect, useState } from "react";
-import { buildSearchEntries, openInBrowser } from "../lib/search";
+import { aggregateSearch, openInBrowser } from "../lib/search";
 import { addFavorite, addHistory, enabledEngineIds } from "../lib/storage";
-import { AppSettings, FavoriteItem, HistoryItem, SearchEntry } from "../lib/types";
+import {
+  AppSettings,
+  EngineStatus,
+  FavoriteItem,
+  HistoryItem,
+  SearchResultItem,
+} from "../lib/types";
 
 interface Props {
   settings: AppSettings;
@@ -17,7 +23,8 @@ export function SearchPage({
   onFavoritesChange,
 }: Props) {
   const [query, setQuery] = useState(initialQuery ?? "");
-  const [entries, setEntries] = useState<SearchEntry[]>([]);
+  const [results, setResults] = useState<SearchResultItem[]>([]);
+  const [statuses, setStatuses] = useState<EngineStatus[]>([]);
   const [searched, setSearched] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -28,8 +35,9 @@ export function SearchPage({
     setQuery(q);
     try {
       const engines = enabledEngineIds(settings);
-      const list = await buildSearchEntries(q, engines);
-      setEntries(list);
+      const resp = await aggregateSearch(q, engines, settings.bingApiKey);
+      setResults(resp.results);
+      setStatuses(resp.statuses);
       setSearched(true);
       onHistoryChange(addHistory(q));
     } finally {
@@ -41,7 +49,6 @@ export function SearchPage({
     if (initialQuery?.trim()) {
       void doSearch(initialQuery);
     }
-    // 仅挂载时根据 initialQuery 触发一次
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -56,18 +63,19 @@ export function SearchPage({
     onFavoritesChange(addFavorite({ title: q, query: q }));
   }
 
-  function favoriteEntry(entry: SearchEntry) {
+  function favoriteResult(item: SearchResultItem) {
     onFavoritesChange(
       addFavorite({
-        title: `${entry.name} · ${query.trim()}`,
-        url: entry.url,
+        title: item.title,
+        url: item.url,
         query: query.trim(),
       }),
     );
   }
 
-  const hasResults = searched && entries.length > 0;
-  const emptyEnabled = searched && entries.length === 0;
+  const hasResults = searched && results.length > 0;
+  const emptyEnabled = searched && results.length === 0;
+  const okCount = statuses.filter((s) => s.ok).length;
 
   return (
     <div className="flex h-full flex-col">
@@ -99,7 +107,7 @@ export function SearchPage({
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="输入关键词，聚合搜索…"
+              placeholder="输入关键词，并行聚合多引擎…"
               className="min-w-0 flex-1 bg-transparent text-base text-neutral-100 placeholder:text-neutral-600"
               autoFocus
             />
@@ -118,10 +126,29 @@ export function SearchPage({
               disabled={busy || !query.trim()}
               className="shrink-0 rounded-lg bg-neutral-100 px-3 py-1.5 text-sm font-medium text-black disabled:opacity-30"
             >
-              {busy ? "…" : "搜索"}
+              {busy ? "搜索中…" : "搜索"}
             </button>
           </div>
         </form>
+
+        {searched && statuses.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {statuses.map((s) => (
+              <span
+                key={s.engineId}
+                title={s.message}
+                className={`rounded-full border px-2 py-0.5 text-[11px] ${
+                  s.ok
+                    ? "border-neutral-700 text-neutral-400"
+                    : "border-neutral-900 text-neutral-600"
+                }`}
+              >
+                {s.name}
+                {s.ok ? ` · ${s.count}` : " · 降级"}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {(hasResults || emptyEnabled) && (
@@ -132,37 +159,60 @@ export function SearchPage({
             </p>
           ) : (
             <ul className="divide-y divide-neutral-900">
-              {entries.map((entry) => (
-                <li key={entry.id} className="group flex items-center gap-3 py-3.5">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-medium text-neutral-200">
-                      {entry.name}
+              {results.map((item) => (
+                <li key={item.id} className="group py-3.5">
+                  <div className="flex items-start gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="mb-1 flex flex-wrap items-center gap-2">
+                        <span className="rounded bg-neutral-900 px-1.5 py-0.5 text-[11px] text-neutral-400">
+                          {item.source}
+                        </span>
+                        {item.kind === "portal" && (
+                          <span className="text-[11px] text-neutral-600">官方入口</span>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void openInBrowser(item.url)}
+                        className="text-left text-sm font-medium text-neutral-100 hover:text-white hover:underline"
+                      >
+                        {item.title}
+                      </button>
+                      {item.snippet && (
+                        <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-neutral-500">
+                          {item.snippet}
+                        </p>
+                      )}
+                      <div className="mt-1 truncate text-[11px] text-neutral-700">
+                        {item.url}
+                      </div>
                     </div>
-                    <div className="mt-0.5 truncate text-xs text-neutral-600">
-                      {entry.url}
+                    <div className="flex shrink-0 flex-col gap-1 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => void openInBrowser(item.url)}
+                        className="rounded-lg border border-neutral-800 px-3 py-1.5 text-xs text-neutral-300 hover:border-neutral-600 hover:text-white"
+                      >
+                        打开
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => favoriteResult(item)}
+                        className="rounded px-2 py-1 text-xs text-neutral-600 opacity-0 transition-opacity hover:text-amber-400 group-hover:opacity-100"
+                        title="收藏此结果"
+                      >
+                        收藏
+                      </button>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => favoriteEntry(entry)}
-                    className="rounded px-2 py-1 text-xs text-neutral-600 opacity-0 transition-opacity hover:text-amber-400 group-hover:opacity-100"
-                    title="收藏此结果入口"
-                  >
-                    收藏
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void openInBrowser(entry.url)}
-                    className="rounded-lg border border-neutral-800 px-3 py-1.5 text-xs text-neutral-300 hover:border-neutral-600 hover:text-white"
-                  >
-                    在浏览器打开
-                  </button>
                 </li>
               ))}
             </ul>
           )}
           <p className="mt-6 text-center text-xs text-neutral-700">
-            MVP：展示各引擎搜索入口（无 API Key）。点击即可在系统浏览器中打开结果页。
+            已聚合 {results.length} 条
+            {statuses.length > 0 ? ` · ${okCount}/${statuses.length} 引擎解析成功` : ""}
+            。部分引擎受反爬限制时会降级为官方结果入口。
           </p>
         </div>
       )}

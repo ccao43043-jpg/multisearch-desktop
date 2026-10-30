@@ -1,64 +1,52 @@
+mod search;
+
+use search::{AggregateResponse, EngineMeta, SearchOptions};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EngineEntry {
     pub id: String,
     pub name: String,
     pub url: String,
 }
 
-/// 根据关键词与启用的引擎 ID，生成各引擎搜索入口 URL。
+/// 根据关键词与启用的引擎 ID，生成各引擎搜索入口 URL（兼容旧调用）。
 #[tauri::command]
 fn build_search_entries(query: String, engines: Vec<String>) -> Vec<EngineEntry> {
-    let q = urlencoding_encode(&query.trim());
+    let q = query.trim();
     if q.is_empty() {
         return Vec::new();
     }
-
-    let catalog: &[(&str, &str, fn(&str) -> String)] = &[
-        ("baidu", "百度", |q| {
-            format!("https://www.baidu.com/s?wd={}", q)
-        }),
-        ("bing", "必应", |q| {
-            format!("https://www.bing.com/search?q={}", q)
-        }),
-        ("google", "Google", |q| {
-            format!("https://www.google.com/search?q={}", q)
-        }),
-        ("duckduckgo", "DuckDuckGo", |q| {
-            format!("https://duckduckgo.com/?q={}", q)
-        }),
-        ("github", "GitHub", |q| {
-            format!("https://github.com/search?q={}&type=repositories", q)
-        }),
-    ];
-
-    catalog
-        .iter()
-        .filter(|(id, _, _)| engines.iter().any(|e| e == *id))
-        .map(|(id, name, build)| EngineEntry {
-            id: id.to_string(),
-            name: name.to_string(),
-            url: build(&q),
+    engines
+        .into_iter()
+        .filter(|id| {
+            matches!(
+                id.as_str(),
+                "baidu" | "bing" | "google" | "sogou" | "so360" | "duckduckgo"
+            )
+        })
+        .map(|id| EngineEntry {
+            name: search::engine_name(&id).into(),
+            url: search::portal_url(&id, q),
+            id,
         })
         .collect()
 }
 
-fn urlencoding_encode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() * 3);
-    for b in s.as_bytes() {
-        match *b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(*b as char);
-            }
-            b' ' => out.push_str("%20"),
-            _ => {
-                out.push('%');
-                out.push_str(&format!("{:02X}", b));
-            }
-        }
-    }
-    out
+/// 并行请求各引擎并聚合结果（标题 / 来源 / 摘要 / 链接）。
+#[tauri::command]
+async fn aggregate_search(
+    query: String,
+    engines: Vec<String>,
+    options: Option<SearchOptions>,
+) -> AggregateResponse {
+    search::aggregate_search(query, engines, options.unwrap_or_default()).await
+}
+
+#[tauri::command]
+fn list_engines() -> Vec<EngineMeta> {
+    search::catalog()
 }
 
 #[tauri::command]
@@ -70,7 +58,13 @@ fn greet() -> String {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![build_search_entries, greet])
+        .invoke_handler(tauri::generate_handler![
+            build_search_entries,
+            aggregate_search,
+            list_engines,
+            greet
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+

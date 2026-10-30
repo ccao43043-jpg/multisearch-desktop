@@ -1,31 +1,44 @@
 # MultiSearch / 聚合搜索
 
-一次输入，多引擎结果入口。Windows 桌面 MVP（**Tauri 2 + React + TypeScript + Tailwind**）。
+一次输入，**多引擎并行请求并聚合结果**。Windows 桌面应用（**Tauri 2 + React + TypeScript + Tailwind**）。
 
 > 本仓库是全新的 Tauri 实现，与旧仓库 `multisearch`（Electron/Android）独立，互不覆盖。
 
-## 功能（v0.1.0 MVP）
+## 功能（v0.2.0）
 
 - **纯黑极简 UI**：主界面大搜索框；左侧可折叠导航（搜索 / 历史 / 收藏 / 设置）
-- **多引擎入口**：百度、必应、Google（可选 DuckDuckGo、GitHub）
-- **结果列表**：每条显示引擎名 + 搜索 URL，一键「在浏览器打开」
-- **历史**：本地 `localStorage` 保存
-- **收藏**：可收藏搜索词或引擎结果入口
-- **设置**：开关搜索源
+- **多引擎并行聚合**：百度、必应、Google（可选搜狗、360、DuckDuckGo）
+- **结果列表**：标题、来源、摘要、链接；一键在系统浏览器打开
+- **设置**：开关 / 上下排序搜索源；可选配置 Bing Web Search API Key
+- **历史 / 收藏**：本地 `localStorage`
 
-> 说明：当前 MVP **不依赖搜索 API Key**。受各引擎反爬与 CORS 限制，应用内以「引擎结果入口列表」展示；点击后在系统默认浏览器打开真实搜索页。后续可接入官方 API 做页内结果聚合。
+## 实现方案摘要
+
+| 引擎 | 默认策略 | 失败时 |
+|------|----------|--------|
+| **必应** | Bing RSS（`format=rss`）；若配置了 Azure Bing Web Search Key 则优先 API | HTML 解析 → 官方搜索入口 |
+| **DuckDuckGo** | Instant Answer 公开 JSON API；再尽力解析 HTML lite | 官方搜索入口 |
+| **百度 / Google / 搜狗 / 360** | 尽力请求结果页并解析 HTML | 检测验证码/反爬后降级为**可点击的官方结果入口** |
+
+聚合在 **Rust 后端并行**完成（`reqwest` + `tokio`），避免浏览器 CORS，并由前端展示统一列表。
+
+## 限制与可选 API Key
+
+- **反爬**：百度、Google、搜狗、360、DuckDuckGo HTML 在部分网络环境会返回验证码或空页。应用会降级为「打开官方搜索页」入口，并在结果旁标注引擎状态。
+- **Bing RSS**：相对稳定，适合无 Key 场景；结果条数与官方页可能不完全一致。
+- **可选 Bing API Key**：在「设置」中填写 Azure [Bing Web Search](https://www.microsoft.com/en-us/bing/apis/bing-web-search-api) 订阅密钥（`Ocp-Apim-Subscription-Key`）。填写后必应优先走官方 API，更稳定、链接更干净。
+- **无 Google / 百度官方免费搜索 API**：未内置付费 CSE 等；需要时可后续扩展。
+- **浏览器预览**（`npm run dev`）：无法调用原生聚合命令时，会降级为各引擎官方入口列表。
 
 ## 环境要求
 
 | 组件 | 版本建议 |
 |------|----------|
 | Node.js | 18+（推荐 20/22） |
-| Rust | stable（`rustup`） |
+| Rust | stable（`rustup`，建议 1.90+） |
 | 系统 | Windows 10/11（目标平台）；macOS / Linux 也可开发 |
 
-### Linux 额外依赖（本 CI/沙箱常缺）
-
-Linux 上构建/运行 Tauri 需要 **WebKitGTK** 等系统库，例如 Debian/Ubuntu：
+### Linux 额外依赖
 
 ```bash
 sudo apt update
@@ -37,7 +50,7 @@ sudo apt install -y \
   libgtk-3-dev
 ```
 
-若缺少 WebKitGTK，`cargo check` / `tauri build` 可能失败；**前端 `npm run build` 仍可独立完成**，代码与工程结构完整。Windows 打包不依赖 WebKitGTK。
+若缺少 WebKitGTK，`cargo check` / `tauri build` 可能失败；**前端 `npm run build` 仍可独立完成**。Windows 打包不依赖 WebKitGTK。
 
 ## 安装依赖
 
@@ -49,42 +62,27 @@ npm install
 
 ## 开发运行
 
-仅前端（浏览器预览，打开外链会走 `window.open`）：
+仅前端（浏览器预览）：
 
 ```bash
 npm run dev
 ```
 
-完整桌面端（需本机已装好 Tauri 系统依赖）：
+完整桌面端：
 
 ```bash
 npm run tauri dev
 ```
 
-## 构建前端
+## 构建
 
 ```bash
 npm run build
-```
-
-产物在 `dist/`。
-
-## 打包桌面应用
-
-```bash
-# Windows：生成 .msi / .exe 等安装包（在 Windows 上执行）
+# Windows 打包
 npm run tauri build
 ```
 
-产物目录：`src-tauri/target/release/bundle/`。
-
-可选检查 Rust 侧（需系统依赖齐全）：
-
-```bash
-cd src-tauri && cargo check
-```
-
-> **构建限制说明**：在缺少 `libwebkit2gtk-4.1-dev` / `libglib2.0-dev` 等 Linux 系统库的环境中，`cargo check` / `tauri build` 会失败（本仓库开发沙箱即如此）。**前端 `npm run build` 已通过**。请在 Windows 本机或装好依赖的 Linux/macOS 上执行 `npm run tauri build` 进行打包。Rust 工具链建议 **1.90+**（当前最新 Tauri 2 要求）。
+产物：`src-tauri/target/release/bundle/`。GitHub Actions 工作流 `release-windows.yml` 可在打 `v*` tag 时自动构建 NSIS 安装包并上传 Release。
 
 ## 项目结构
 
@@ -93,10 +91,9 @@ multisearch-desktop/
 ├── src/                 # React 前端
 │   ├── components/      # 侧栏等
 │   ├── pages/           # 搜索 / 历史 / 收藏 / 设置
-│   └── lib/             # 类型、本地存储、搜索入口
+│   └── lib/             # 类型、本地存储、聚合调用
 ├── src-tauri/           # Tauri 2 + Rust
-│   ├── src/lib.rs       # build_search_entries 等命令
-│   └── tauri.conf.json
+│   └── src/search/      # 并行抓取与各引擎解析
 └── README.md
 ```
 
