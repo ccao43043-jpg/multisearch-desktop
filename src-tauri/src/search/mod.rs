@@ -3,11 +3,10 @@ mod html;
 mod types;
 
 #[allow(unused_imports)]
-pub use types::{AggregateResponse, EngineStatus, SearchOptions, SearchResult};
+pub use types::{AggregateResponse, EngineMeta, EngineStatus, SearchOptions, SearchResult};
 
 use engines::search_one;
 use futures::future::join_all;
-use types::EngineMeta;
 
 /// 已知引擎元数据（顺序为默认展示顺序）。
 pub fn catalog() -> Vec<EngineMeta> {
